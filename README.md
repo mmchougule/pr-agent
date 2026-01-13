@@ -12,7 +12,8 @@ npx pr-agent run --repo owner/repo --task "add unit tests"
 
 Creates an isolated sandbox, runs Claude Code, and opens a PR.
 
-![PR Agent Demo](https://github.com/invariant-ai/pr-agent/raw/main/docs/demo.gif)
+<!-- Demo GIF will be added here after recording -->
+<!-- ![PR Agent Demo](https://github.com/mmchougule/pr-agent/raw/main/docs/demo.gif) -->
 
 ## Documentation
 
@@ -205,7 +206,7 @@ Contributions are welcome! Please open an issue or PR.
 
 ```bash
 # Clone the repo
-git clone https://github.com/invariant-ai/pr-agent.git
+git clone https://github.com/mmchougule/pr-agent.git
 cd pr-agent
 
 # Install dependencies
@@ -229,5 +230,5 @@ MIT - see [LICENSE](./LICENSE)
 
 - [Website](https://invariant.sh)
 - [Documentation](https://docs.invariant.sh)
-- [GitHub](https://github.com/invariant-ai/pr-agent)
+- [GitHub](https://github.com/mmchougule/pr-agent)
 - [Discord](https://discord.gg/invariant)
