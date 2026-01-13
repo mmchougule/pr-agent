@@ -58,6 +58,18 @@ export interface ProgressBarProps {
    * @default true
    */
   showPercentage?: boolean;
+
+  /**
+   * Enable smooth transitions for progress updates
+   * @default true
+   */
+  smoothTransition?: boolean;
+
+  /**
+   * Transition speed in milliseconds
+   * @default 50
+   */
+  transitionSpeed?: number;
 }
 
 /**
@@ -74,14 +86,55 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
   disableAnimation = false,
   label,
   showPercentage = true,
+  smoothTransition = true,
+  transitionSpeed = 50,
 }) => {
   const [frameIndex, setFrameIndex] = useState(0);
+  const [displayProgress, setDisplayProgress] = useState(progress);
 
   // Clamp progress between 0 and 100
   const clampedProgress = Math.max(0, Math.min(100, progress));
-  const percentage = Math.round(clampedProgress);
+  const percentage = Math.round(displayProgress);
 
-  // Animation effect
+  // Smooth transition effect for progress updates
+  useEffect(() => {
+    if (!smoothTransition || disableAnimation) {
+      setDisplayProgress(clampedProgress);
+      return;
+    }
+
+    // Animate progress changes smoothly
+    const diff = clampedProgress - displayProgress;
+    if (Math.abs(diff) < 0.1) {
+      setDisplayProgress(clampedProgress);
+      return;
+    }
+
+    const step = diff / 10; // Divide into 10 steps
+    let currentStep = 0;
+
+    const interval = setInterval(() => {
+      currentStep++;
+      setDisplayProgress((prev) => {
+        const newValue = prev + step;
+        // Clamp to avoid overshooting
+        if (step > 0) {
+          return Math.min(newValue, clampedProgress);
+        } else {
+          return Math.max(newValue, clampedProgress);
+        }
+      });
+
+      if (currentStep >= 10) {
+        clearInterval(interval);
+        setDisplayProgress(clampedProgress);
+      }
+    }, transitionSpeed);
+
+    return () => clearInterval(interval);
+  }, [clampedProgress, smoothTransition, transitionSpeed, disableAnimation]);
+
+  // Animation effect for spinner and dots styles
   useEffect(() => {
     if (disableAnimation || style === 'bar') {
       return;
@@ -99,7 +152,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
    * Renders a bar-style progress indicator
    */
   const renderBar = () => {
-    const filledWidth = Math.round((width * clampedProgress) / 100);
+    const filledWidth = Math.round((width * displayProgress) / 100);
     const emptyWidth = width - filledWidth;
 
     const filled = '█'.repeat(filledWidth);
