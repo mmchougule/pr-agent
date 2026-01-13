@@ -3,9 +3,10 @@
  * Displays live sandbox metrics during execution (similar to React frontend)
  */
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
 import { colors } from '../theme.js';
+import { ProgressBar } from './ProgressBar.js';
 
 export interface SandboxMetrics {
   sandboxId?: string;
@@ -19,6 +20,7 @@ export interface SandboxMetrics {
 interface SandboxMonitorProps {
   metrics: SandboxMetrics;
   showDetails?: boolean;
+  showProgress?: boolean;  // Whether to show progress bar
 }
 
 /**
@@ -42,8 +44,46 @@ function formatCost(cost: number): string {
   return `$${cost.toFixed(4)}`;
 }
 
-export function SandboxMonitor({ metrics, showDetails = true }: SandboxMonitorProps) {
+/**
+ * Calculate sandbox operation progress based on phase and metrics
+ */
+function calculateSandboxProgress(phase: string, uptime: number, isRunning: boolean): number {
+  if (!isRunning) return 100;
+
+  // Map phases to progress percentages for sandbox operations
+  const phaseProgress: Record<string, number> = {
+    sandbox: 20,     // Initializing sandbox
+    clone: 50,       // Cloning repository (major I/O operation)
+    agent: 80,       // Agent running (most time spent here)
+    push: 95,        // Pushing changes
+    pr: 98,          // Creating PR
+    complete: 100,
+  };
+
+  let progress = phaseProgress[phase] || 0;
+
+  // Add a small time-based increment for long-running operations
+  // to show that work is being done
+  if (phase === 'agent' && uptime > 30) {
+    // Gradually increase from 80 to 95 over time during agent phase
+    const timeBonus = Math.min(15, Math.floor((uptime - 30) / 10));
+    progress = Math.min(95, progress + timeBonus);
+  }
+
+  return progress;
+}
+
+export function SandboxMonitor({ metrics, showDetails = true, showProgress = true }: SandboxMonitorProps) {
   const { sandboxId, jobId, uptime, estimatedCost, phase, isRunning } = metrics;
+
+  // Track progress state
+  const [progress, setProgress] = useState(0);
+
+  // Update progress based on phase and uptime
+  useEffect(() => {
+    const newProgress = calculateSandboxProgress(phase, uptime, isRunning);
+    setProgress(newProgress);
+  }, [phase, uptime, isRunning]);
 
   // Status indicator
   const statusIcon = isRunning ? '●' : '○';
@@ -83,6 +123,18 @@ export function SandboxMonitor({ metrics, showDetails = true }: SandboxMonitorPr
       <Box marginLeft={2}>
         <Text color={colors.accent}>{phase}</Text>
       </Box>
+
+      {/* Progress bar for sandbox operations */}
+      {showProgress && isRunning && progress < 100 && (
+        <Box marginLeft={2} marginTop={1}>
+          <ProgressBar
+            progress={progress}
+            style="bar"
+            width={30}
+            showPercentage={false}
+          />
+        </Box>
+      )}
     </Box>
   );
 }
