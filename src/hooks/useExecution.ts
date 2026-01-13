@@ -34,6 +34,7 @@ interface ExecutionState {
   error?: string;
   jobId?: string;  // Job ID for tracking
   sandboxMetrics?: SandboxMetrics;
+  progress: number;  // Progress percentage (0-100)
 }
 
 const DEFAULT_STEPS: Step[] = [
@@ -54,6 +55,30 @@ interface UseExecutionOptions {
   githubToken?: string;
 }
 
+// Phase to progress percentage mapping
+const PHASE_PROGRESS_MAP: Record<Phase, number> = {
+  sandbox: 10,
+  clone: 25,
+  agent: 50,
+  push: 80,
+  pr: 95,
+  complete: 100,
+};
+
+/**
+ * Calculate progress percentage based on current phase and step completion
+ */
+function calculateProgress(phase: Phase, steps: Step[]): number {
+  const baseProgress = PHASE_PROGRESS_MAP[phase] || 0;
+
+  // If all steps are completed, return 100%
+  if (steps.every(step => step.status === 'completed')) {
+    return 100;
+  }
+
+  return baseProgress;
+}
+
 export function useExecution(options: UseExecutionOptions | null) {
   const [state, setState] = useState<ExecutionState>({
     status: 'idle',
@@ -61,6 +86,7 @@ export function useExecution(options: UseExecutionOptions | null) {
     message: '',
     steps: DEFAULT_STEPS.map(s => ({ ...s })),
     agentLogs: [],
+    progress: 0,
   });
 
   const updateStepStatus = useCallback((stepId: string, status: StepStatus, detail?: string) => {
@@ -77,12 +103,14 @@ export function useExecution(options: UseExecutionOptions | null) {
 
     const startTime = new Date();
 
+    const initialSteps = DEFAULT_STEPS.map(s => ({ ...s }));
     setState((prev) => ({
       ...prev,
       status: 'executing',
       phase: 'sandbox',
       message: 'Starting execution...',
-      steps: DEFAULT_STEPS.map(s => ({ ...s })),
+      steps: initialSteps,
+      progress: calculateProgress('sandbox', initialSteps),
       sandboxMetrics: {
         uptime: 0,
         estimatedCost: 0,
@@ -121,7 +149,7 @@ export function useExecution(options: UseExecutionOptions | null) {
             // E2B pricing: ~$0.12/min for standard sandbox
             const estimatedCost = (uptime / 60) * 0.12;
 
-            return {
+            const newState = {
               ...prev,
               phase: typedPhase,
               message,
@@ -134,6 +162,11 @@ export function useExecution(options: UseExecutionOptions | null) {
                 isRunning: true,
               },
             };
+
+            // Calculate progress based on new phase
+            newState.progress = calculateProgress(typedPhase, prev.steps);
+
+            return newState;
           });
 
           // Update step statuses based on phase
@@ -168,12 +201,14 @@ export function useExecution(options: UseExecutionOptions | null) {
 
         onResult: (result) => {
           if (result?.success) {
+            const completedSteps = prev.steps.map((step) => ({ ...step, status: 'completed' as StepStatus }));
             setState((prev) => ({
               ...prev,
               status: 'success',
               phase: 'complete',
               result,
-              steps: prev.steps.map((step) => ({ ...step, status: 'completed' as StepStatus })),
+              steps: completedSteps,
+              progress: 100,
               sandboxMetrics: prev.sandboxMetrics ? {
                 ...prev.sandboxMetrics,
                 sandboxId: result.sandboxId || prev.sandboxMetrics.sandboxId,
@@ -189,6 +224,7 @@ export function useExecution(options: UseExecutionOptions | null) {
               phase: 'complete',
               result,
               error: result?.error || 'Task failed',
+              progress: 0,
               sandboxMetrics: prev.sandboxMetrics ? {
                 ...prev.sandboxMetrics,
                 isRunning: false,
@@ -202,6 +238,7 @@ export function useExecution(options: UseExecutionOptions | null) {
             ...prev,
             status: 'failed',
             error,
+            progress: 0,
             sandboxMetrics: prev.sandboxMetrics ? {
               ...prev.sandboxMetrics,
               isRunning: false,
@@ -217,6 +254,7 @@ export function useExecution(options: UseExecutionOptions | null) {
         ...prev,
         status: 'failed',
         error: err instanceof Error ? err.message : 'Unknown error',
+        progress: 0,
       }));
     }
   }, [options, updateStepStatus]);
