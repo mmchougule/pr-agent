@@ -12,8 +12,7 @@ npx pr-agent run --repo owner/repo --task "add unit tests"
 
 Creates an isolated sandbox, runs Claude Code, and opens a PR.
 
-<!-- Demo GIF will be added here after recording -->
-<!-- ![PR Agent Demo](https://github.com/mmchougule/pr-agent/raw/main/docs/demo.gif) -->
+![PR Agent Demo](https://github.com/invariant-ai/pr-agent/raw/main/docs/demo.gif)
 
 ## Documentation
 
@@ -75,6 +74,64 @@ pr-agent fix-pr --repo owner/repo --pr 123
 | `--pr` | Yes | PR number to fix |
 | `--task` | No | Specific fix instructions |
 
+### `pr-agent snapshot`
+
+Generate an AI-friendly code structure with refs (like element refs in web browsers, but for code).
+
+```bash
+# Snapshot current directory
+pr-agent snapshot
+
+# Snapshot specific path
+pr-agent snapshot src/lib
+
+# Interactive only (functions & classes)
+pr-agent snapshot src/ -i
+
+# Compact output
+pr-agent snapshot -c
+
+# JSON output
+pr-agent snapshot --json
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `-i, --interactive` | Only show functions and classes |
+| `-c, --compact` | Compact output (no nested items) |
+| `-d, --depth` | Max directory depth (default: 10) |
+| `--json` | Output as JSON |
+
+**Ref Types:**
+- `@f1, @f2, ...` - Functions
+- `@c1, @c2, ...` - Classes
+- `@m1, @m2, ...` - Modules/Files
+- `@t1, @t2, ...` - Types/Interfaces
+
+### `pr-agent show`
+
+Display details for a specific code ref.
+
+```bash
+# Show function @f1
+pr-agent show @f1
+
+# Show with more context lines
+pr-agent show @f1 -c 30
+
+# Show from specific path
+pr-agent show @f5 -p src/lib
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `-c, --context` | Lines of context (default: 20) |
+| `-p, --path` | Root path for snapshot |
+
 ### `pr-agent auth`
 
 Authenticate with GitHub (required for private repos).
@@ -99,6 +156,34 @@ Show current authentication status.
 
 ```bash
 pr-agent status
+```
+
+### `pr-agent jobs`
+
+List recent jobs.
+
+```bash
+pr-agent jobs
+pr-agent jobs --status running
+pr-agent jobs --limit 20
+```
+
+### `pr-agent watch`
+
+Watch a running job or replay a completed one.
+
+```bash
+pr-agent watch <jobId>
+pr-agent watch <jobId> --speed 2
+```
+
+### `pr-agent replay`
+
+Replay a completed job at custom speed.
+
+```bash
+pr-agent replay <jobId>
+pr-agent replay <jobId> --speed 4
 ```
 
 ## Examples
@@ -206,7 +291,7 @@ Contributions are welcome! Please open an issue or PR.
 
 ```bash
 # Clone the repo
-git clone https://github.com/mmchougule/pr-agent.git
+git clone https://github.com/invariant-ai/pr-agent.git
 cd pr-agent
 
 # Install dependencies
@@ -230,5 +315,5 @@ MIT - see [LICENSE](./LICENSE)
 
 - [Website](https://invariant.sh)
 - [Documentation](https://docs.invariant.sh)
-- [GitHub](https://github.com/mmchougule/pr-agent)
+- [GitHub](https://github.com/invariant-ai/pr-agent)
 - [Discord](https://discord.gg/invariant)

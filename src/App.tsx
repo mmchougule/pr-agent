@@ -14,7 +14,7 @@ import { SandboxMonitor } from './components/SandboxMonitor.js';
 import { useExecution } from './hooks/useExecution.js';
 import { useAuth } from './hooks/useAuth.js';
 
-type AppMode = 'run' | 'auth' | 'test-stream' | 'fix-pr';
+type AppMode = 'run' | 'auth' | 'test-stream' | 'fix-pr' | 'watch';
 
 type SkillName = 'test-writer' | 'code-reviewer' | 'type-fixer' | 'linter' | 'security-scanner' | 'docs-generator';
 
@@ -25,6 +25,8 @@ interface AppProps {
   branch?: string;
   skill?: SkillName;
   prNumber?: number;  // For fix-pr mode
+  jobId?: string;     // For watch mode
+  speed?: number;     // For watch mode (replay speed)
   version?: string;
 }
 
@@ -305,7 +307,8 @@ function TestStreamMode() {
 
 /**
  * Fix-PR Mode - Fix conflicts or update an existing PR
- * Fetches PR details first, then works on the PR's head branch
+ * The backend creates a new branch and handles push/PR creation.
+ * We just provide context about what PR to reference.
  */
 function FixPRMode({
   repo,
@@ -316,27 +319,22 @@ function FixPRMode({
   prNumber: number;
   task: string;
 }) {
-  // Build a comprehensive task that tells Claude Code exactly what to do
-  // The key is to checkout the PR branch (not create a new one)
-  const fixTask = `## Task: Fix PR #${prNumber}
+  // Build the task with PR context but WITHOUT telling Claude to checkout PR branch
+  // The backend (CodingSupervisor) handles branch management - it creates invariant/fix-ci-xxx
+  // Claude should work on that branch, not checkout a different one
+  const fixTask = `## Task: Fix issues in PR #${prNumber}
 
 ${task}
 
-## Instructions:
-1. First, fetch and checkout the existing PR branch:
-   - Run: gh pr checkout ${prNumber}
-   - This will checkout the PR's head branch directly
+## Context:
+- This is related to PR #${prNumber} on this repository
+- You can view PR details with: gh pr view ${prNumber}
+- Focus on fixing the issues described above
 
-2. Then fix the merge conflicts:
-   - Run: git fetch origin main
-   - Run: git rebase origin/main (or git merge origin/main)
-   - Resolve any conflicts
-
-3. After fixing:
-   - Run tests if applicable
-   - Push the changes: git push --force-with-lease
-
-IMPORTANT: Do NOT create a new branch. Use the existing PR branch from 'gh pr checkout ${prNumber}'.`;
+## Important:
+- Work on the CURRENT branch (do NOT run 'gh pr checkout' or switch branches)
+- The system handles branch management and PR creation automatically
+- After making changes, commit them (the system will push and create/update PR)`;
 
   return (
     <RunMode
@@ -349,9 +347,172 @@ IMPORTANT: Do NOT create a new branch. Use the existing PR branch from 'gh pr ch
 }
 
 /**
+ * Watch Mode - Watch a running job or replay a completed one
+ * Connects to the watch/replay endpoint and streams events
+ */
+function WatchMode({ jobId, speed = 1 }: { jobId: string; speed?: number }) {
+  const { exit } = useApp();
+  const [phase, setPhase] = useState<Phase>('sandbox');
+  const [message, setMessage] = useState(`Connecting to job ${jobId.substring(0, 8)}...`);
+  const [jobStatus, setJobStatus] = useState<'connecting' | 'watching' | 'replaying' | 'done' | 'error'>('connecting');
+  const [steps, setSteps] = useState<Step[]>([
+    { id: 'sandbox', label: 'Create sandbox', status: 'pending' },
+    { id: 'clone', label: 'Clone repository', status: 'pending' },
+    { id: 'agent', label: 'Run Claude Code', status: 'pending' },
+    { id: 'push', label: 'Push changes', status: 'pending' },
+    { id: 'pr', label: 'Create pull request', status: 'pending' },
+  ]);
+  const [agentLogs, setAgentLogs] = useState<Array<{
+    type: 'tool_call' | 'thinking' | 'message' | 'tool_result';
+    tool?: string;
+    display?: string;
+    content?: string;
+    timestamp: Date;
+  }>>([]);
+  const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [esRef, setEsRef] = useState<any>(null);
+
+  useEffect(() => {
+    let es: any = null;
+
+    const setupStream = async () => {
+      const { getApiBaseUrl } = await import('./lib/config.js');
+      const { default: EventSource } = await import('eventsource');
+
+      const baseUrl = getApiBaseUrl();
+      // Use replay endpoint for watch (handles both running and completed jobs)
+      const url = speed !== 1
+        ? `${baseUrl}/api/pr-agent/${jobId}/replay?speed=${speed}`
+        : `${baseUrl}/api/pr-agent/${jobId}/watch`;
+
+      setMessage(speed !== 1 ? `Replaying at ${speed}x speed...` : 'Connecting...');
+
+      es = new EventSource(url);
+      setEsRef(es);
+
+      es.onopen = () => {
+        setJobStatus(speed !== 1 ? 'replaying' : 'watching');
+        setMessage(speed !== 1 ? `Replaying at ${speed}x speed...` : 'Watching live...');
+      };
+
+      es.onmessage = (event: any) => {
+        try {
+          if (event.data === ':heartbeat') return;
+          const data = JSON.parse(event.data);
+
+          if (data.type === 'status') {
+            setPhase(data.phase || 'sandbox');
+            setMessage(data.message || '');
+
+            const phaseOrder = ['sandbox', 'clone', 'agent', 'push', 'pr'];
+            const currentIndex = phaseOrder.indexOf(data.phase || 'sandbox');
+            setSteps(prev => prev.map((step, idx) => ({
+              ...step,
+              status: idx < currentIndex ? 'completed' : idx === currentIndex ? 'running' : 'pending'
+            } as Step)));
+          }
+
+          if (data.type === 'agent') {
+            setAgentLogs(prev => [...prev, {
+              type: data.eventType,
+              tool: data.tool,
+              display: data.display,
+              content: data.output || data.content,
+              timestamp: new Date(data.timestamp || Date.now()),
+            }].slice(-30));
+          }
+
+          if (data.type === 'result') {
+            setResult(data.result);
+            setJobStatus('done');
+            setSteps(prev => prev.map(s => ({ ...s, status: 'completed' as const })));
+            es.close();
+          }
+
+          if (data.type === 'error') {
+            setError(data.error);
+            setJobStatus('error');
+            es.close();
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      };
+
+      es.onerror = (err: any) => {
+        // Check if it's just the stream ending (normal for replay)
+        if (es.readyState === 2) { // CLOSED
+          if (!result && !error) {
+            setJobStatus('done');
+          }
+        } else {
+          setError('Connection lost');
+          setJobStatus('error');
+        }
+        es.close();
+      };
+    };
+
+    setupStream();
+
+    return () => {
+      if (es) es.close();
+    };
+  }, [jobId, speed]);
+
+  // Handle escape key
+  useInput((_input, key) => {
+    if (key.escape) {
+      if (esRef) esRef.close();
+      exit();
+    }
+  });
+
+  // Exit after result
+  useEffect(() => {
+    if (jobStatus === 'done' || jobStatus === 'error') {
+      const timer = setTimeout(() => exit(), 500);
+      return () => clearTimeout(timer);
+    }
+  }, [jobStatus, exit]);
+
+  const showSteps = steps.some(s => s.status !== 'pending');
+  const showLogs = agentLogs.length > 0;
+
+  return (
+    <Box flexDirection="column">
+      <PhaseStatus phase={phase} message={message} />
+      {showSteps && <StepList steps={steps} />}
+      {showLogs && <StreamingLogs logs={agentLogs} />}
+      {result && (
+        <ResultBox
+          success={result.success}
+          prUrl={result.prUrl}
+          prNumber={result.prNumber}
+          filesChanged={result.filesChanged}
+          additions={result.additions}
+          deletions={result.deletions}
+          sandboxId={result.sandboxId}
+          estimatedCostUsd={result.estimatedCostUsd}
+          sandboxDurationSeconds={result.sandboxDurationSeconds}
+          llmInputTokens={result.llmInputTokens}
+          llmOutputTokens={result.llmOutputTokens}
+          llmModel={result.llmModel}
+          summary={result.proof?.summary}
+          fixBranch={result.fixBranch}
+          commitSha={result.commitSha}
+        />
+      )}
+      {error && <ErrorBox error={error} />}
+    </Box>
+  );
+}
+
+/**
  * Main App Component
  */
-export function App({ mode, repo, task, branch, skill, prNumber, version }: AppProps) {
+export function App({ mode, repo, task, branch, skill, prNumber, jobId, speed, version }: AppProps) {
   return (
     <Box flexDirection="column">
       <Intro version={version} />
@@ -367,6 +528,10 @@ export function App({ mode, repo, task, branch, skill, prNumber, version }: AppP
       {mode === 'auth' && <AuthMode />}
 
       {mode === 'test-stream' && <TestStreamMode />}
+
+      {mode === 'watch' && jobId && (
+        <WatchMode jobId={jobId} speed={speed} />
+      )}
     </Box>
   );
 }

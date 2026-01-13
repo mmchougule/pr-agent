@@ -6,6 +6,8 @@
  * Usage:
  *   npx pr-agent run --repo owner/repo --task "add unit tests"
  *   pr-agent auth
+ *   pr-agent snapshot src/
+ *   pr-agent show @f1
  */
 
 import React from 'react';
@@ -13,6 +15,9 @@ import { render } from 'ink';
 import { Command } from 'commander';
 import { App } from './App.js';
 import { isAuthenticated, getConfigValue, clearAuth } from './lib/config.js';
+import { getSnapshot, resolveRef, getRefContent, formatStats, type SnapshotResult } from './lib/snapshot.js';
+import { getGitContext } from './lib/git.js';
+import { join, resolve } from 'path';
 
 // Read version from package.json
 const VERSION = '1.1.0';
@@ -223,6 +228,139 @@ program
       }
     } catch (error) {
       console.error('Error listing jobs:', error instanceof Error ? error.message : 'Unknown error');
+      process.exit(1);
+    }
+  });
+
+/**
+ * Watch command - Watch a running job or replay a completed one
+ * This is the killer feature from Electric SQL's durable sessions pattern
+ */
+program
+  .command('watch <jobId>')
+  .description('Watch a running job or replay a completed one')
+  .option('--speed <speed>', 'Replay speed multiplier (0.5-10)', '1')
+  .action(async (jobId: string, options: { speed: string }) => {
+    const speed = Math.max(0.5, Math.min(10, parseFloat(options.speed) || 1));
+
+    // Render watch mode
+    render(<App mode="watch" jobId={jobId} speed={speed} version={VERSION} />);
+  });
+
+/**
+ * Replay command - Alias for watch with speed option prominent
+ */
+program
+  .command('replay <jobId>')
+  .description('Replay a completed job at custom speed')
+  .option('--speed <speed>', 'Replay speed multiplier (default: 4x for fast replay)', '4')
+  .action(async (jobId: string, options: { speed: string }) => {
+    const speed = Math.max(0.5, Math.min(10, parseFloat(options.speed) || 4));
+
+    render(<App mode="watch" jobId={jobId} speed={speed} version={VERSION} />);
+  });
+
+/**
+ * Snapshot command - Generate AI-friendly code structure with refs
+ * Like agent-browser element refs, but for code
+ */
+program
+  .command('snapshot [path]')
+  .description('Generate code structure with AI-friendly refs (@f1, @c2, etc.)')
+  .option('-i, --interactive', 'Only show interactive elements (functions, classes)')
+  .option('-c, --compact', 'Compact output (no nested items)')
+  .option('-d, --depth <depth>', 'Max directory depth', '10')
+  .option('--json', 'Output as JSON')
+  .action((targetPath: string | undefined, options: { interactive?: boolean; compact?: boolean; depth?: string; json?: boolean }) => {
+    const rootPath = targetPath ? resolve(process.cwd(), targetPath) : process.cwd();
+    const depth = parseInt(options.depth || '10', 10);
+
+    try {
+      const snapshot = getSnapshot({
+        path: rootPath,
+        depth,
+        interactive: options.interactive,
+        compact: options.compact,
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify({
+          tree: snapshot.tree,
+          refs: snapshot.refs,
+          stats: snapshot.stats,
+        }, null, 2));
+        return;
+      }
+
+      // Print header
+      const gitContext = getGitContext(rootPath);
+      console.log('\n\x1b[1m\x1b[36mCode Snapshot\x1b[0m');
+      console.log('\x1b[2m' + '─'.repeat(50) + '\x1b[0m');
+      
+      if (gitContext.isGitRepo) {
+        console.log(`\x1b[2mRepo: ${gitContext.repo || 'local'} (${gitContext.branch})\x1b[0m`);
+      }
+      console.log(`\x1b[2mPath: ${rootPath}\x1b[0m`);
+      console.log(`\x1b[2mStats: ${formatStats(snapshot.stats)}\x1b[0m`);
+      console.log('\x1b[2m' + '─'.repeat(50) + '\x1b[0m\n');
+
+      // Print tree
+      console.log(snapshot.tree);
+
+      // Print legend
+      console.log('\n\x1b[2m' + '─'.repeat(50) + '\x1b[0m');
+      console.log('\x1b[2mRefs: @f=function, @c=class, @m=module, @t=type\x1b[0m');
+      console.log('\x1b[2mUse "pr-agent show @f1" to view a specific ref\x1b[0m\n');
+    } catch (err) {
+      console.error('\x1b[31mError:\x1b[0m', err instanceof Error ? err.message : 'Failed to generate snapshot');
+      process.exit(1);
+    }
+  });
+
+/**
+ * Show command - Display details for a specific ref
+ */
+program
+  .command('show <ref>')
+  .description('Show details for a code ref (e.g., @f1, @c2)')
+  .option('-c, --context <lines>', 'Lines of context to show', '20')
+  .option('-p, --path <path>', 'Root path for snapshot', process.cwd())
+  .action((ref: string, options: { context?: string; path?: string }) => {
+    const rootPath = options.path ? resolve(process.cwd(), options.path) : process.cwd();
+    const contextLines = parseInt(options.context || '20', 10);
+
+    try {
+      // Generate snapshot to find the ref
+      const snapshot = getSnapshot({ path: rootPath, interactive: false });
+      const codeRef = resolveRef(ref, snapshot);
+
+      if (!codeRef) {
+        console.error(`\x1b[31mError:\x1b[0m Ref "${ref}" not found`);
+        console.log('\x1b[2mRun "pr-agent snapshot" to see available refs\x1b[0m');
+        process.exit(1);
+      }
+
+      // Print ref details
+      console.log('\n\x1b[1m\x1b[36m' + codeRef.ref + '\x1b[0m \x1b[1m' + codeRef.name + '\x1b[0m');
+      console.log('\x1b[2m' + '─'.repeat(50) + '\x1b[0m');
+      console.log(`\x1b[2mType:\x1b[0m ${codeRef.type}`);
+      console.log(`\x1b[2mPath:\x1b[0m ${codeRef.path}${codeRef.line ? `:${codeRef.line}` : ''}`);
+      if (codeRef.signature) {
+        console.log(`\x1b[2mSignature:\x1b[0m ${codeRef.signature}`);
+      }
+      console.log('\x1b[2m' + '─'.repeat(50) + '\x1b[0m\n');
+
+      // Show code content
+      const content = getRefContent(codeRef, rootPath, contextLines);
+      if (content) {
+        console.log('\x1b[2mCode:\x1b[0m');
+        console.log(content);
+        console.log('');
+      } else {
+        console.log('\x1b[2mCould not read file content\x1b[0m\n');
+      }
+    } catch (err) {
+      console.error('\x1b[31mError:\x1b[0m', err instanceof Error ? err.message : 'Failed to show ref');
       process.exit(1);
     }
   });
