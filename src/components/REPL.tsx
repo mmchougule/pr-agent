@@ -18,11 +18,13 @@ import {
   parseCommand,
   getCommand,
   checkCommandRateLimit,
+  getCommandRateLimitStatus,
   type CommandContext,
 } from '../commands/index.js';
 import { loadSession, createSession, saveSession, hasPlan, getPlanPath, getProgress } from '../lib/session.js';
 import { loadPlan, type Plan, updateTaskInPlan } from '../lib/plan-parser.js';
-import { generatePlanWithClaude, getClaudeApiKey } from '../lib/claude-client.js';
+import { generatePlanWithClaude, getClaudeApiKey, getClaudeRateLimitStatus } from '../lib/claude-client.js';
+import { getRateLimitStatus } from '../lib/api-client.js';
 import { getSnapshot, formatStats } from '../lib/snapshot.js';
 import { savePlan, createEmptyPlan, type PlanTask } from '../lib/plan-parser.js';
 import {
@@ -758,14 +760,96 @@ export function REPL({ version = '1.0.0', initialRepo, onSwitchMode }: REPLProps
       </Box>
 
       {/* Status bar */}
-      <Box paddingX={2} marginTop={1}>
+      <Box paddingX={2} marginTop={1} flexDirection="column">
         <Text color={colors.muted} dimColor>
           {showConfirm
             ? 'Enter: execute | Esc: cancel'
             : 'Tab: switch | /help: commands | Esc: exit'}
         </Text>
+        <RateLimitStatusBar />
       </Box>
     </Box>
+  );
+}
+
+// Rate limit status bar component
+function RateLimitStatusBar(): JSX.Element | null {
+  const [rateLimits, setRateLimits] = useState<{
+    api: { minute: number; hour: number; enabled: boolean };
+    claude: { minute: number; hour: number; enabled: boolean };
+    commands: { remaining: number; enabled: boolean };
+  } | null>(null);
+
+  useEffect(() => {
+    const updateRateLimits = () => {
+      const apiStatus = getRateLimitStatus();
+      const claudeStatus = getClaudeRateLimitStatus();
+      const commandStatus = getCommandRateLimitStatus();
+
+      setRateLimits({
+        api: {
+          minute: apiStatus.tokensRemainingMinute,
+          hour: apiStatus.tokensRemainingHour,
+          enabled: apiStatus.rateLimitingEnabled,
+        },
+        claude: {
+          minute: claudeStatus.tokensRemainingMinute,
+          hour: claudeStatus.tokensRemainingHour,
+          enabled: claudeStatus.rateLimitingEnabled,
+        },
+        commands: {
+          remaining: commandStatus.tokensRemaining,
+          enabled: commandStatus.enabled,
+        },
+      });
+    };
+
+    // Update initially
+    updateRateLimits();
+
+    // Update every 5 seconds
+    const interval = setInterval(updateRateLimits, 5000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  if (!rateLimits || (!rateLimits.api.enabled && !rateLimits.claude.enabled && !rateLimits.commands.enabled)) {
+    return null;
+  }
+
+  const getColor = (remaining: number, max: number): string => {
+    const ratio = remaining / max;
+    if (ratio > 0.5) return colors.success;
+    if (ratio > 0.2) return colors.warning;
+    return colors.error;
+  };
+
+  const parts: string[] = [];
+
+  if (rateLimits.api.enabled && rateLimits.api.minute < 60) {
+    const color = getColor(rateLimits.api.minute, 60);
+    parts.push(`API: ${Math.floor(rateLimits.api.minute)}/min`);
+  }
+
+  if (rateLimits.claude.enabled && rateLimits.claude.minute < 50) {
+    const color = getColor(rateLimits.claude.minute, 50);
+    parts.push(`Claude: ${Math.floor(rateLimits.claude.minute)}/min`);
+  }
+
+  if (rateLimits.commands.enabled && rateLimits.commands.remaining < 30) {
+    const color = getColor(rateLimits.commands.remaining, 30);
+    parts.push(`Commands: ${Math.floor(rateLimits.commands.remaining)}/min`);
+  }
+
+  // Only show if approaching limits
+  if (parts.length === 0) {
+    return null;
+  }
+
+  return (
+    <Text color={colors.muted} dimColor>
+      Rate limits: {parts.join(' | ')}
+    </Text>
   );
 }
 
