@@ -25,3 +25,4 @@ pnpm-lock.yaml
 # Debug logs
 *.log
 npm-debug.log*
+.pr-agent/

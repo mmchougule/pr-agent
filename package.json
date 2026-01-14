@@ -5,6 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
+    "inv": "./dist/index.js",
     "pr-agent": "./dist/index.js"
   },
   "scripts": {
@@ -29,12 +30,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mmchougule/pr-agent.git"
+    "url": "git+https://github.com/invariant-ai/pr-agent.git"
   },
   "bugs": {
-    "url": "https://github.com/mmchougule/pr-agent/issues"
+    "url": "https://github.com/invariant-ai/pr-agent/issues"
   },
-  "homepage": "https://github.com/mmchougule/pr-agent#readme",
+  "homepage": "https://github.com/invariant-ai/pr-agent#readme",
   "engines": {
     "node": ">=18.0.0"
   },

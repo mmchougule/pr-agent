@@ -366,19 +366,155 @@ program
   });
 
 /**
+ * Plan command - Create and manage execution plans (CLI shortcut)
+ */
+program
+  .command('plan [description...]')
+  .description('Create an execution plan for a feature')
+  .option('--repo <owner/repo>', 'Repository to work on')
+  .option('--show', 'Show current plan')
+  .option('--clear', 'Clear current plan')
+  .action(async (description: string[], options: { repo?: string; show?: boolean; clear?: boolean }) => {
+    // Import REPL for plan mode
+    const { REPL } = await import('./components/REPL.js');
+
+    // Handle --show flag
+    if (options.show) {
+      const { loadPlan } = await import('./lib/plan-parser.js');
+      const { getPlanPath, hasPlan } = await import('./lib/session.js');
+
+      if (!hasPlan()) {
+        console.log('No plan exists. Use "pr-agent plan <description>" to create one.');
+        return;
+      }
+
+      const plan = loadPlan(getPlanPath());
+      if (plan) {
+        console.log(`\n# ${plan.metadata.name}\n`);
+        console.log(`Repo: ${plan.metadata.repo} | Branch: ${plan.metadata.branch}\n`);
+        for (const task of plan.tasks) {
+          const icon = { pending: '○', running: '◐', completed: '●', failed: '✗', skipped: '⊘' }[task.status];
+          console.log(`${icon} [${task.id}] ${task.title} (${task.status})`);
+        }
+        console.log('');
+      }
+      return;
+    }
+
+    // Handle --clear flag
+    if (options.clear) {
+      const { getPlanPath } = await import('./lib/session.js');
+      const { unlinkSync, existsSync } = await import('fs');
+      const planPath = getPlanPath();
+      if (existsSync(planPath)) {
+        unlinkSync(planPath);
+        console.log('Plan cleared.');
+      } else {
+        console.log('No plan to clear.');
+      }
+      return;
+    }
+
+    // If no description, launch REPL
+    if (description.length === 0) {
+      render(<REPL version={VERSION} />);
+      return;
+    }
+
+    // Create plan from description
+    const desc = description.join(' ');
+    console.log(`Creating plan: "${desc}"`);
+    console.log('Use "pr-agent" to enter interactive mode and run /ship to execute.');
+  });
+
+/**
+ * Ship command - Execute the current plan (CLI shortcut)
+ */
+program
+  .command('ship')
+  .description('Execute the current plan')
+  .option('--step', 'Pause after each task')
+  .option('--auto', 'Run all tasks without pausing')
+  .action(async (_options: { step?: boolean; auto?: boolean }) => {
+    const { hasPlan, getPlanPath, loadSession } = await import('./lib/session.js');
+    const { loadPlan } = await import('./lib/plan-parser.js');
+
+    if (!hasPlan()) {
+      console.error('No plan exists. Use "pr-agent plan <description>" first.');
+      process.exit(1);
+    }
+
+    const plan = loadPlan(getPlanPath());
+    const session = loadSession();
+
+    if (!plan || !session) {
+      console.error('Failed to load plan or session.');
+      process.exit(1);
+    }
+
+    // Launch run mode with the first pending task
+    const pendingTasks = plan.tasks.filter(t => t.status === 'pending');
+    if (pendingTasks.length === 0) {
+      console.log('All tasks completed!');
+      if (session.execution.prUrl) {
+        console.log(`PR: ${session.execution.prUrl}`);
+      }
+      return;
+    }
+
+    const task = pendingTasks[0];
+    const taskPrompt = `Task ${task.id}: ${task.title}\n\n${task.description}`;
+
+    render(
+      <App
+        mode="run"
+        repo={plan.metadata.repo}
+        task={taskPrompt}
+        version={VERSION}
+      />
+    );
+  });
+
+/**
  * Interactive mode - Just type `pr-agent` with no args for a Claude Code-like experience
+ * Now uses the enhanced REPL with slash commands!
  */
 program
   .command('interactive', { isDefault: true })
-  .description('Interactive mode - prompt for repo and task')
+  .description('Interactive mode with slash commands (/plan, /ship, /help)')
   .action(async () => {
     // If any other command was passed, skip interactive mode
     if (process.argv.length > 2 && !['interactive'].includes(process.argv[2])) {
       return;
     }
 
-    const { InteractiveMode } = await import('./components/InteractiveMode.js');
-    render(<InteractiveMode version={VERSION} />);
+    // Use the new REPL with slash commands
+    const { REPL } = await import('./components/REPL.js');
+
+    // Handle mode switching from REPL
+    const handleSwitchMode = (mode: string, data: Record<string, any>) => {
+      if (mode === 'run' && data.repo && data.task) {
+        render(
+          <App
+            mode="run"
+            repo={data.repo}
+            task={data.task}
+            version={VERSION}
+          />
+        );
+      } else if (mode === 'watch' && data.jobId) {
+        render(
+          <App
+            mode="watch"
+            jobId={data.jobId}
+            speed={data.speed || 1}
+            version={VERSION}
+          />
+        );
+      }
+    };
+
+    render(<REPL version={VERSION} onSwitchMode={handleSwitchMode} />);
   });
 
 // Parse command line arguments

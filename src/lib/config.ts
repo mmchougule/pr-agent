@@ -15,6 +15,9 @@ export interface Config {
   githubToken?: string;
   githubUsername?: string;
 
+  // Anthropic API (for plan generation)
+  anthropicApiKey?: string;
+
   // API endpoint (for self-hosted)
   apiBaseUrl?: string;
 
