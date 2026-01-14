@@ -10,6 +10,22 @@ import { join } from 'path';
 const CONFIG_DIR = join(homedir(), '.pr-agent');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 
+export interface RateLimitSettings {
+  // API Client rate limits (requests per minute)
+  apiRequestsPerMinute?: number;
+  apiRequestsPerHour?: number;
+
+  // Claude API rate limits
+  claudeRequestsPerMinute?: number;
+  claudeRequestsPerHour?: number;
+
+  // Command execution rate limits
+  commandsPerMinute?: number;
+
+  // Enable/disable rate limiting
+  enableRateLimiting?: boolean;
+}
+
 export interface Config {
   // GitHub authentication
   githubToken?: string;
@@ -24,6 +40,9 @@ export interface Config {
   // Preferences
   defaultBranch?: string;
   sandboxProvider?: 'e2b' | 'daytona';
+
+  // Rate limiting configuration
+  rateLimits?: RateLimitSettings;
 }
 
 /**
@@ -110,4 +129,46 @@ export function getApiBaseUrl(): string {
   // Then check config file
   const config = loadConfig();
   return config.apiBaseUrl || 'https://api.useinvariant.com';
+}
+
+/**
+ * Default rate limit settings
+ */
+export const DEFAULT_RATE_LIMITS: Required<RateLimitSettings> = {
+  // API Client: 60 requests per minute, 1000 per hour
+  apiRequestsPerMinute: 60,
+  apiRequestsPerHour: 1000,
+
+  // Claude API: 50 requests per minute (Anthropic tier limits)
+  claudeRequestsPerMinute: 50,
+  claudeRequestsPerHour: 1000,
+
+  // Commands: 30 per minute (prevent spam)
+  commandsPerMinute: 30,
+
+  // Rate limiting enabled by default
+  enableRateLimiting: true,
+};
+
+/**
+ * Get rate limit settings with defaults
+ */
+export function getRateLimitSettings(): Required<RateLimitSettings> {
+  const config = loadConfig();
+  return {
+    ...DEFAULT_RATE_LIMITS,
+    ...config.rateLimits,
+  };
+}
+
+/**
+ * Update rate limit settings
+ */
+export function setRateLimitSettings(settings: Partial<RateLimitSettings>): void {
+  const config = loadConfig();
+  config.rateLimits = {
+    ...config.rateLimits,
+    ...settings,
+  };
+  saveConfig(config);
 }
