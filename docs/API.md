@@ -5,7 +5,7 @@ Complete API documentation for programmatic access to pr-agent.
 ## Base URL
 
 ```
-Production: https://api.invariant.sh
+Production: https://api.useinvariant.com
 Local:      http://localhost:3001
 ```
 
@@ -45,7 +45,7 @@ Content-Type: application/json
 **Example Request:**
 
 ```bash
-curl -X POST https://api.invariant.sh/api/pr-agent/execute \
+curl -X POST https://api.useinvariant.com/api/pr-agent/execute \
   -H "Content-Type: application/json" \
   -d '{
     "repo": "myorg/myrepo",
@@ -84,7 +84,7 @@ GET /api/pr-agent/:jobId
 **Example Request:**
 
 ```bash
-curl https://api.invariant.sh/api/pr-agent/550e8400-e29b-41d4-a716-446655440000
+curl https://api.useinvariant.com/api/pr-agent/550e8400-e29b-41d4-a716-446655440000
 ```
 
 **Response:**
@@ -131,7 +131,7 @@ Accept: text/event-stream
 **Example Request:**
 
 ```bash
-curl -N https://api.invariant.sh/api/pr-agent/550e8400-e29b-41d4-a716-446655440000/stream
+curl -N https://api.useinvariant.com/api/pr-agent/550e8400-e29b-41d4-a716-446655440000/stream
 ```
 
 **Response Format:**
@@ -246,7 +246,7 @@ Authorization: Bearer ghp_your_github_token
 **Example Request:**
 
 ```bash
-curl https://api.invariant.sh/api/pr-agent/jobs?limit=5 \
+curl https://api.useinvariant.com/api/pr-agent/jobs?limit=5 \
   -H "Authorization: Bearer ghp_your_github_token"
 ```
 
@@ -294,7 +294,7 @@ When rate limited:
 {
   "error": "Rate limit exceeded",
   "retryAfter": 3600,
-  "upgradeUrl": "https://invariant.sh/pricing"
+  "upgradeUrl": "https://useinvariant.com/pricing"
 }
 ```
 
@@ -350,14 +350,14 @@ streamJob(streamUrl, {
 
 ```bash
 # Execute task
-JOB=$(curl -s -X POST https://api.invariant.sh/api/pr-agent/execute \
+JOB=$(curl -s -X POST https://api.useinvariant.com/api/pr-agent/execute \
   -H "Content-Type: application/json" \
   -d '{"repo":"myorg/myrepo","task":"add tests"}')
 
 JOB_ID=$(echo $JOB | jq -r '.jobId')
 
 # Stream events
-curl -N "https://api.invariant.sh/api/pr-agent/$JOB_ID/stream"
+curl -N "https://api.useinvariant.com/api/pr-agent/$JOB_ID/stream"
 ```
 
 ### Python
@@ -368,14 +368,14 @@ import sseclient
 
 # Execute task
 response = requests.post(
-    'https://api.invariant.sh/api/pr-agent/execute',
+    'https://api.useinvariant.com/api/pr-agent/execute',
     json={'repo': 'myorg/myrepo', 'task': 'add tests'}
 )
 data = response.json()
 
 # Stream events
 stream = requests.get(
-    f"https://api.invariant.sh{data['streamUrl']}",
+    f"https://api.useinvariant.com{data['streamUrl']}",
     stream=True
 )
 client = sseclient.SSEClient(stream)
