@@ -14,6 +14,8 @@ export {
   getCommand,
   getAllCommands,
   parseCommand,
+  checkCommandRateLimit,
+  getCommandRateLimitStatus,
 } from './types.js';
 
 // Import all commands to trigger registration

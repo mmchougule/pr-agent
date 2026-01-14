@@ -17,6 +17,7 @@ import { colors } from '../theme.js';
 import {
   parseCommand,
   getCommand,
+  checkCommandRateLimit,
   type CommandContext,
 } from '../commands/index.js';
 import { loadSession, createSession, saveSession, hasPlan, getPlanPath, getProgress } from '../lib/session.js';
@@ -432,6 +433,14 @@ export function REPL({ version = '1.0.0', initialRepo, onSwitchMode }: REPLProps
 
       if (!cmd) {
         addOutput('error', `Unknown: /${parsed.name}`);
+        return;
+      }
+
+      // Check rate limit before executing command
+      const rateLimitCheck = checkCommandRateLimit(parsed.name);
+      if (!rateLimitCheck.allowed) {
+        const retrySeconds = Math.ceil((rateLimitCheck.retryAfter || 0) / 1000);
+        addOutput('error', `Rate limit exceeded. Please wait ${retrySeconds} seconds before trying again.`);
         return;
       }
 
