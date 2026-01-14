@@ -592,8 +592,13 @@ export function REPL({ version = '1.0.0', initialRepo, onSwitchMode }: REPLProps
   };
 
   // Calculate task stats
+  const pendingCount = currentPlan?.tasks.filter(t => t.status === 'pending').length || 0;
+  const completedCount = currentPlan?.tasks.filter(t => t.status === 'completed').length || 0;
+  const totalCount = currentPlan?.tasks.length || 0;
   const taskStats = currentPlan
-    ? `${currentPlan.tasks.filter(t => t.status === 'pending').length}/${currentPlan.tasks.length}`
+    ? pendingCount > 0
+      ? `${pendingCount}/${totalCount} pending`
+      : `${completedCount}/${totalCount} done`
     : null;
 
   return (
@@ -670,10 +675,21 @@ export function REPL({ version = '1.0.0', initialRepo, onSwitchMode }: REPLProps
             <Text color={colors.text}>What do you want to build?</Text>
             <Text color={colors.muted}>Type a description or /help for commands</Text>
             <Text color={colors.muted}> </Text>
-            <Text color={colors.warning}>
-              Existing plan: {currentPlan.metadata.name} ({currentPlan.tasks.filter(t => t.status === 'pending').length} pending)
-            </Text>
-            <Text color={colors.muted}>Tab to Ship mode to continue, or /reset to start fresh</Text>
+            {currentPlan.tasks.filter(t => t.status === 'pending').length > 0 ? (
+              <>
+                <Text color={colors.warning}>
+                  Existing plan: {currentPlan.metadata.name} ({currentPlan.tasks.filter(t => t.status === 'pending').length}/{currentPlan.tasks.length} pending)
+                </Text>
+                <Text color={colors.muted}>Tab to Ship mode to continue, or /reset to start fresh</Text>
+              </>
+            ) : (
+              <>
+                <Text color={colors.success}>
+                  Completed: {currentPlan.metadata.name} ({currentPlan.tasks.length}/{currentPlan.tasks.length} done)
+                </Text>
+                <Text color={colors.muted}>Use /done to archive, or type a new task to start fresh</Text>
+              </>
+            )}
           </Box>
         )}
         {output.length === 0 && mode === 'ship' && !currentPlan && (
