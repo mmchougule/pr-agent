@@ -5,10 +5,133 @@
  * Falls back to backend if no API key configured.
  */
 
-import { getConfigValue, setConfigValue } from './config.js';
+import { getConfigValue, setConfigValue, getRateLimitSettings } from './config.js';
+import { RateLimiterManager, RateLimitedExecutor } from './rate-limiter.js';
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-20250514'; // Fast and capable
+
+// ============================================================================
+// Rate Limiting Setup
+// ============================================================================
+
+// Global rate limiter manager for Claude API
+const claudeRateLimiterManager = new RateLimiterManager();
+
+/**
+ * Initialize Claude rate limiters based on configuration
+ */
+function initializeClaudeRateLimiters(): void {
+  const settings = getRateLimitSettings();
+
+  if (!settings.enableRateLimiting) {
+    return;
+  }
+
+  // Claude API requests rate limiter (per minute)
+  claudeRateLimiterManager.register('claude-minute', {
+    maxTokens: settings.claudeRequestsPerMinute,
+    refillRate: settings.claudeRequestsPerMinute,
+    refillInterval: 60000, // 1 minute
+  });
+
+  // Claude API requests rate limiter (per hour)
+  claudeRateLimiterManager.register('claude-hour', {
+    maxTokens: settings.claudeRequestsPerHour,
+    refillRate: settings.claudeRequestsPerHour,
+    refillInterval: 3600000, // 1 hour
+  });
+}
+
+// Initialize on module load
+initializeClaudeRateLimiters();
+
+/**
+ * Create a rate limited executor for Claude API calls with retry logic
+ */
+function createClaudeExecutor(): RateLimitedExecutor {
+  const settings = getRateLimitSettings();
+
+  return new RateLimitedExecutor(
+    {
+      maxTokens: settings.claudeRequestsPerMinute,
+      refillRate: settings.claudeRequestsPerMinute,
+      refillInterval: 60000,
+    },
+    {
+      maxRetries: 3,
+      baseDelay: 2000, // 2 seconds (Claude rate limits are stricter)
+      maxDelay: 60000, // 60 seconds
+    }
+  );
+}
+
+const claudeExecutor = createClaudeExecutor();
+
+/**
+ * Check Claude API rate limits before making a request
+ * @throws Error if rate limit exceeded
+ */
+function checkClaudeRateLimit(): void {
+  const settings = getRateLimitSettings();
+
+  if (!settings.enableRateLimiting) {
+    return;
+  }
+
+  // Use a fixed key since Claude API is per-account
+  const key = 'claude-api';
+
+  // Check minute limit
+  const minuteResult = claudeRateLimiterManager.consume('claude-minute', key);
+  if (!minuteResult.allowed) {
+    throw new Error(
+      `Claude API rate limit exceeded: ${settings.claudeRequestsPerMinute} requests per minute. ` +
+      `Retry after ${Math.ceil((minuteResult.retryAfter || 0) / 1000)} seconds.`
+    );
+  }
+
+  // Check hour limit
+  const hourResult = claudeRateLimiterManager.consume('claude-hour', key);
+  if (!hourResult.allowed) {
+    throw new Error(
+      `Claude API rate limit exceeded: ${settings.claudeRequestsPerHour} requests per hour. ` +
+      `Retry after ${Math.ceil((hourResult.retryAfter || 0) / 1000)} seconds.`
+    );
+  }
+}
+
+/**
+ * Get current Claude API rate limit status
+ */
+export interface ClaudeRateLimitStatus {
+  tokensRemainingMinute: number;
+  tokensRemainingHour: number;
+  rateLimitingEnabled: boolean;
+}
+
+export function getClaudeRateLimitStatus(): ClaudeRateLimitStatus {
+  const settings = getRateLimitSettings();
+  const key = 'claude-api';
+
+  if (!settings.enableRateLimiting) {
+    return {
+      tokensRemainingMinute: Infinity,
+      tokensRemainingHour: Infinity,
+      rateLimitingEnabled: false,
+    };
+  }
+
+  return {
+    tokensRemainingMinute: claudeRateLimiterManager.getTokens('claude-minute', key),
+    tokensRemainingHour: claudeRateLimiterManager.getTokens('claude-hour', key),
+    rateLimitingEnabled: true,
+  };
+}
+
+// ============================================================================
+// Types
+// ============================================================================
 
 export interface ClaudeMessage {
   role: 'user' | 'assistant';
@@ -75,54 +198,60 @@ export async function callClaude(
     );
   }
 
+  // Check rate limits before making request
+  checkClaudeRateLimit();
+
   const { maxTokens = 4096, temperature = 0.3 } = options;
 
-  const response = await fetch(ANTHROPIC_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: maxTokens,
-      temperature,
-      system: systemPrompt,
-      messages: messages.map(m => ({
-        role: m.role,
-        content: m.content,
-      })),
-    }),
-  });
+  // Execute with rate limiting and retry logic
+  return await claudeExecutor.execute('claude-api', async () => {
+    const response = await fetch(ANTHROPIC_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: maxTokens,
+        temperature,
+        system: systemPrompt,
+        messages: messages.map(m => ({
+          role: m.role,
+          content: m.content,
+        })),
+      }),
+    });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: { message: 'Unknown error' } })) as {
-      error?: { message?: string; type?: string };
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: { message: 'Unknown error' } })) as {
+        error?: { message?: string; type?: string };
+      };
+
+      if (response.status === 401) {
+        throw new Error('Invalid Anthropic API key. Check your key and try again.');
+      }
+
+      if (response.status === 429) {
+        throw new Error('429: Rate limited by Anthropic. Please wait and try again.');
+      }
+
+      throw new Error(error.error?.message || `API error: ${response.status}`);
+    }
+
+    const data = await response.json() as ClaudeResponse;
+
+    const text = data.content
+      .filter(c => c.type === 'text')
+      .map(c => c.text)
+      .join('');
+
+    return {
+      text,
+      usage: data.usage,
     };
-
-    if (response.status === 401) {
-      throw new Error('Invalid Anthropic API key. Check your key and try again.');
-    }
-
-    if (response.status === 429) {
-      throw new Error('Rate limited. Wait a moment and try again.');
-    }
-
-    throw new Error(error.error?.message || `API error: ${response.status}`);
-  }
-
-  const data = await response.json() as ClaudeResponse;
-
-  const text = data.content
-    .filter(c => c.type === 'text')
-    .map(c => c.text)
-    .join('');
-
-  return {
-    text,
-    usage: data.usage,
-  };
+  });
 }
 
 /**
