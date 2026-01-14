@@ -33,3 +33,4 @@ import './reset.js';
 import './retry.js';
 import './done.js';
 import './history.js';
+import './jobs.js';

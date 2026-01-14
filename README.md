@@ -1,319 +1,162 @@
-# pr-agent
+# inv
 
-Delegate repo work to a coding agent. Creates PRs automatically.
+**Delegate repo work to a coding agent.** Plan tasks, execute in parallel, get PRs.
 
 ```bash
-# Interactive mode - just run pr-agent and follow prompts
-npx pr-agent
-
-# Or specify everything in one command
-npx pr-agent run --repo owner/repo --task "add unit tests"
+inv
 ```
 
-Creates an isolated sandbox, runs Claude Code, and opens a PR.
+That's it. Interactive mode guides you through everything.
 
-![PR Agent Demo](https://github.com/invariant-ai/pr-agent/raw/main/docs/demo.gif)
+## What It Does
 
-## Documentation
+1. **Plan** - Describe what you want in natural language. AI breaks it into tasks.
+2. **Ship** - Execute all tasks in a single Claude Code session. One sandbox, one PR.
+3. **Watch** - Monitor progress in real-time or replay completed jobs.
 
-- **[Quick Start](./docs/QUICKSTART.md)** - Get started in 5 minutes
-- **[Architecture](./docs/ARCHITECTURE.md)** - How it works under the hood
-- **[API Reference](./docs/API.md)** - Programmatic access
+```
+> /plan add user authentication with JWT
 
-## Installation
+Creating plan...
+
+## Plan: Add User Authentication
+1. [US-001] Add User model with bcrypt
+2. [US-002] Create auth service with JWT
+3. [US-003] Add login endpoint
+4. [US-004] Add auth middleware
+
+[Approve] [Edit] [Cancel]
+
+> /ship
+
+Starting execution...
+```
+
+## Quick Start
 
 ```bash
-# Run directly with npx (no install needed)
-npx pr-agent run --repo owner/repo --task "your task"
+# Clone and run locally (not published to npm yet)
+git clone https://github.com/mmchougule/pr-agent.git
+cd pr-agent
+npm install
+npm run build
+npm link
 
-# Or install globally
-npm install -g pr-agent
+# Now run from any directory
+inv
 ```
 
 ## Commands
 
-### `pr-agent` (Interactive Mode)
-
-Launch interactive mode - prompts for repo and task step by step.
+### Interactive Mode (Recommended)
 
 ```bash
-pr-agent
+inv
 ```
 
-Perfect for quick tasks and demos.
+Launches the REPL with slash commands:
 
-### `pr-agent run`
+| Command | Description |
+|---------|-------------|
+| `/plan <description>` | Create an execution plan |
+| `/ship` | Execute all tasks |
+| `/status` | Show current session status |
+| `/jobs` | List recent jobs |
+| `/watch <jobId>` | Watch a running job |
+| `/logs` | View execution logs |
+| `/done` | Archive completed plan |
+| `/history` | View archived plans |
+| `/help` | Show all commands |
 
-Execute a task and create a PR.
-
-```bash
-pr-agent run --repo owner/repo --task "add unit tests"
-```
-
-**Options:**
-
-| Flag | Required | Description |
-|------|----------|-------------|
-| `--repo` | Yes | Repository (owner/repo) |
-| `--task` | Yes | Task description |
-| `--branch` | No | Base branch (default: main) |
-
-### `pr-agent fix-pr`
-
-Fix an existing PR based on review comments or CI failures.
+### CLI Commands
 
 ```bash
-pr-agent fix-pr --repo owner/repo --pr 123
-```
+# Run a single task
+inv run --repo owner/repo --task "add unit tests"
 
-**Options:**
+# Fix an existing PR
+inv fix-pr --repo owner/repo --pr 123
 
-| Flag | Required | Description |
-|------|----------|-------------|
-| `--repo` | Yes | Repository (owner/repo) |
-| `--pr` | Yes | PR number to fix |
-| `--task` | No | Specific fix instructions |
+# List jobs
+inv jobs
 
-### `pr-agent snapshot`
-
-Generate an AI-friendly code structure with refs (like element refs in web browsers, but for code).
-
-```bash
-# Snapshot current directory
-pr-agent snapshot
-
-# Snapshot specific path
-pr-agent snapshot src/lib
-
-# Interactive only (functions & classes)
-pr-agent snapshot src/ -i
-
-# Compact output
-pr-agent snapshot -c
-
-# JSON output
-pr-agent snapshot --json
-```
-
-**Options:**
-
-| Flag | Description |
-|------|-------------|
-| `-i, --interactive` | Only show functions and classes |
-| `-c, --compact` | Compact output (no nested items) |
-| `-d, --depth` | Max directory depth (default: 10) |
-| `--json` | Output as JSON |
-
-**Ref Types:**
-- `@f1, @f2, ...` - Functions
-- `@c1, @c2, ...` - Classes
-- `@m1, @m2, ...` - Modules/Files
-- `@t1, @t2, ...` - Types/Interfaces
-
-### `pr-agent show`
-
-Display details for a specific code ref.
-
-```bash
-# Show function @f1
-pr-agent show @f1
-
-# Show with more context lines
-pr-agent show @f1 -c 30
-
-# Show from specific path
-pr-agent show @f5 -p src/lib
-```
-
-**Options:**
-
-| Flag | Description |
-|------|-------------|
-| `-c, --context` | Lines of context (default: 20) |
-| `-p, --path` | Root path for snapshot |
-
-### `pr-agent auth`
-
-Authenticate with GitHub (required for private repos).
-
-```bash
-pr-agent auth
-```
-
-Opens a browser for GitHub OAuth device flow. Your token is stored locally in `~/.pr-agent/config.json`.
-
-### `pr-agent logout`
-
-Clear saved authentication.
-
-```bash
-pr-agent logout
-```
-
-### `pr-agent status`
-
-Show current authentication status.
-
-```bash
-pr-agent status
-```
-
-### `pr-agent jobs`
-
-List recent jobs.
-
-```bash
-pr-agent jobs
-pr-agent jobs --status running
-pr-agent jobs --limit 20
-```
-
-### `pr-agent watch`
-
-Watch a running job or replay a completed one.
-
-```bash
-pr-agent watch <jobId>
-pr-agent watch <jobId> --speed 2
-```
-
-### `pr-agent replay`
-
-Replay a completed job at custom speed.
-
-```bash
-pr-agent replay <jobId>
-pr-agent replay <jobId> --speed 4
-```
-
-## Examples
-
-### Add tests to a repository
-
-```bash
-npx pr-agent run \
-  --repo myorg/myrepo \
-  --task "add unit tests for the authentication module"
-```
-
-### Fix CI failures
-
-```bash
-npx pr-agent run \
-  --repo myorg/myrepo \
-  --task "fix the failing TypeScript type errors in CI"
-```
-
-### Refactor code
-
-```bash
-npx pr-agent run \
-  --repo myorg/myrepo \
-  --task "refactor the UserService to use dependency injection"
-```
-
-### Work on a specific branch
-
-```bash
-npx pr-agent run \
-  --repo myorg/myrepo \
-  --task "add error handling to API endpoints" \
-  --branch feature/api-v2
+# Watch/replay a job
+inv watch <jobId>
+inv replay <jobId> --speed 4
 ```
 
 ## How It Works
 
-1. **Creates an isolated sandbox** - Your code runs in a secure E2B sandbox
-2. **Clones your repository** - The agent clones your repo into the sandbox
-3. **Runs Claude Code** - An AI coding agent works on your task
-4. **Opens a PR** - Changes are committed and a pull request is created
+```
+┌─────────────────────────────────────────────────────────┐
+│                    INV WORKFLOW                          │
+├─────────────────────────────────────────────────────────┤
+│                                                          │
+│  /plan "add auth"                                        │
+│       │                                                  │
+│       ▼                                                  │
+│  ┌─────────────┐   AI generates task breakdown          │
+│  │   PLAN      │   Saved to .pr-agent/plan.md           │
+│  └─────────────┘                                         │
+│       │                                                  │
+│       ▼                                                  │
+│  /ship                                                   │
+│       │                                                  │
+│       ▼                                                  │
+│  ┌─────────────┐   E2B sandbox + Claude Code            │
+│  │   EXECUTE   │   All tasks in single session          │
+│  └─────────────┘   Commits per task                     │
+│       │                                                  │
+│       ▼                                                  │
+│  ┌─────────────┐                                         │
+│  │     PR      │   Single PR with all changes           │
+│  └─────────────┘                                         │
+│                                                          │
+└─────────────────────────────────────────────────────────┘
+```
 
-## Rate Limits
+## Architecture
 
-| User Type | Limit |
-|-----------|-------|
-| Anonymous | 3 tasks/day |
-| Authenticated | 10 tasks/day |
-| Pro | Unlimited |
+- **CLI**: React + Ink terminal UI
+- **Execution**: E2B sandbox with Claude Code
+- **Streaming**: Server-sent events for real-time updates
+- **Persistence**: Local session state in `.pr-agent/`
+
+Inspired by [Ralph TUI](https://github.com/subsy/ralph-tui) and [OpenCode](https://github.com/anomalyco/opencode).
+
+## Session Files
+
+```
+your-project/
+└── .pr-agent/
+    ├── plan.md          # Current plan (source of truth)
+    ├── state.json       # Execution state
+    └── logs/            # Task execution logs
+```
 
 ## Requirements
 
 - Node.js 18+
-- A public GitHub repository (or authenticate for private repos)
+- GitHub repository (authenticate for private repos)
 
-## Privacy & Security
-
-- Your code runs in an isolated sandbox
-- No code is stored after execution
-- GitHub tokens are stored locally with secure permissions
-- See our [Privacy Policy](https://invariant.sh/privacy)
-
-## Powered By
-
-pr-agent uses **Claude Code** running in an **E2B sandbox** to execute coding tasks. Under the hood:
-
-- **Claude Code** - Anthropic's AI coding assistant with full file system access
-- **E2B Sandbox** - Secure, isolated execution environment
-- **GitHub API** - Automatic PR creation and branch management
-
-## Advanced Usage
-
-### Using Skills (Coming Soon)
+## Development
 
 ```bash
-# Run built-in skills
-npx pr-agent run --repo myorg/repo --skill test-runner
-npx pr-agent run --repo myorg/repo --skill linter-fixer
-npx pr-agent run --repo myorg/repo --skill security-scan
-```
-
-### Programmatic Access
-
-```typescript
-import { executeTask, streamJob } from 'pr-agent/lib/api-client';
-
-const { jobId, streamUrl } = await executeTask({
-  repo: 'myorg/myrepo',
-  task: 'add unit tests',
-});
-
-streamJob(streamUrl, {
-  onStatus: (msg, phase) => console.log(`[${phase}] ${msg}`),
-  onResult: (result) => console.log(`PR: ${result.prUrl}`),
-});
-```
-
-See the [API Reference](./docs/API.md) for full documentation.
-
-## Contributing
-
-Contributions are welcome! Please open an issue or PR.
-
-```bash
-# Clone the repo
-git clone https://github.com/invariant-ai/pr-agent.git
-cd pr-agent
-
-# Install dependencies
-npm install
-
 # Run in dev mode
 npm run dev
 
 # Build
 npm run build
 
-# Link globally for testing
-npm link
+# Type check
+npm run typecheck
 ```
 
 ## License
 
-MIT - see [LICENSE](./LICENSE)
+MIT
 
 ## Links
 
-- [Website](https://invariant.sh)
-- [Documentation](https://docs.invariant.sh)
-- [GitHub](https://github.com/invariant-ai/pr-agent)
-- [Discord](https://discord.gg/invariant)
+- [Invariant](https://useinvariant.com) - The team behind inv
+- [Documentation](https://docs.useinvariant.com/pr-agent)

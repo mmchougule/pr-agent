@@ -209,20 +209,23 @@ program
           pending: '\x1b[33m',   // Yellow
           running: '\x1b[36m',   // Cyan
           success: '\x1b[32m',   // Green
+          completed: '\x1b[32m', // Green (same as success)
           failed: '\x1b[31m',    // Red
         }[job.status] || '\x1b[0m';
 
         const resetColor = '\x1b[0m';
         const dimColor = '\x1b[2m';
+        const boldColor = '\x1b[1m';
 
         const createdAt = new Date(job.createdAt).toLocaleString();
         const taskPreview = job.task.length > 50 ? job.task.substring(0, 47) + '...' : job.task;
 
-        console.log(`${statusColor}${job.status.padEnd(8)}${resetColor} ${job.repoFullName}`);
-        console.log(`${dimColor}         ${taskPreview}${resetColor}`);
-        console.log(`${dimColor}         ${createdAt}${job.sandboxId ? ` · sandbox:${job.sandboxId.substring(0, 8)}` : ''}${resetColor}`);
+        console.log(`${statusColor}${job.status.padEnd(10)}${resetColor} ${boldColor}${job.id}${resetColor}`);
+        console.log(`${dimColor}           ${job.repoFullName}${resetColor}`);
+        console.log(`${dimColor}           ${taskPreview}${resetColor}`);
+        console.log(`${dimColor}           ${createdAt}${resetColor}`);
         if (job.prUrl) {
-          console.log(`         ${job.prUrl}`);
+          console.log(`           ${job.prUrl}`);
         }
         console.log('');
       }

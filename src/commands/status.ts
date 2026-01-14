@@ -8,7 +8,6 @@ import {
   hasPlan,
   getPlanPath,
   getProgress,
-  getRunningJobs,
 } from '../lib/session.js';
 import { loadPlan } from '../lib/plan-parser.js';
 
@@ -74,16 +73,8 @@ registerCommand({
 
     ctx.print('');
 
-    // Background jobs
-    const runningJobs = getRunningJobs();
-    if (runningJobs.length > 0) {
-      ctx.print('Background Jobs:');
-      for (const job of runningJobs) {
-        ctx.print(`  ${job.jobId.substring(0, 8)}... (${job.status})`);
-      }
-    }
-
-    ctx.print('');
+    // Background jobs hint
+    ctx.print('Jobs: Use /jobs to view recent jobs\n');
 
     return { success: true };
   },
