@@ -3,6 +3,8 @@
  */
 
 import type { SessionState } from '../lib/session.js';
+import { getRateLimitSettings } from '../lib/config.js';
+import { TokenBucketRateLimiter } from '../lib/rate-limiter.js';
 
 /**
  * Result of executing a command
@@ -65,6 +67,72 @@ export interface CommandDefinition {
  * All available commands
  */
 export const COMMANDS: Record<string, CommandDefinition> = {};
+
+// ============================================================================
+// Command Rate Limiting
+// ============================================================================
+
+/**
+ * Rate limiter for command execution
+ */
+let commandRateLimiter: TokenBucketRateLimiter | null = null;
+
+/**
+ * Initialize command rate limiter based on configuration
+ */
+function initializeCommandRateLimiter(): void {
+  const settings = getRateLimitSettings();
+
+  if (!settings.enableRateLimiting) {
+    commandRateLimiter = null;
+    return;
+  }
+
+  commandRateLimiter = new TokenBucketRateLimiter({
+    maxTokens: settings.commandsPerMinute,
+    refillRate: settings.commandsPerMinute,
+    refillInterval: 60000, // 1 minute
+  });
+}
+
+// Initialize on module load
+initializeCommandRateLimiter();
+
+/**
+ * Check if a command can be executed (rate limit)
+ * @param commandName - Name of the command being executed
+ * @returns true if allowed, false if rate limited
+ */
+export function checkCommandRateLimit(commandName: string): { allowed: boolean; retryAfter?: number } {
+  const settings = getRateLimitSettings();
+
+  if (!settings.enableRateLimiting || !commandRateLimiter) {
+    return { allowed: true };
+  }
+
+  const result = commandRateLimiter.consume(commandName);
+  return {
+    allowed: result.allowed,
+    retryAfter: result.retryAfter,
+  };
+}
+
+/**
+ * Get current command rate limit status
+ */
+export function getCommandRateLimitStatus(): { tokensRemaining: number; enabled: boolean } {
+  const settings = getRateLimitSettings();
+
+  if (!settings.enableRateLimiting || !commandRateLimiter) {
+    return { tokensRemaining: Infinity, enabled: false };
+  }
+
+  // Use a generic key for overall command tracking
+  return {
+    tokensRemaining: commandRateLimiter.getTokens('commands'),
+    enabled: true,
+  };
+}
 
 /**
  * Register a command

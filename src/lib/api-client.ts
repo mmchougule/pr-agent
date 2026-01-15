@@ -4,7 +4,8 @@
  */
 
 import EventSource from 'eventsource';
-import { getApiBaseUrl, getConfigValue } from './config.js';
+import { getApiBaseUrl, getConfigValue, getRateLimitSettings } from './config.js';
+import { RateLimiterManager, RateLimitedExecutor } from './rate-limiter.js';
 
 // ============================================================================
 // Types
@@ -105,6 +106,123 @@ export interface StreamCallbacks {
 }
 
 // ============================================================================
+// Rate Limiting Setup
+// ============================================================================
+
+// Global rate limiter manager for API client
+const rateLimiterManager = new RateLimiterManager();
+
+/**
+ * Initialize rate limiters based on configuration
+ */
+function initializeRateLimiters(): void {
+  const settings = getRateLimitSettings();
+
+  if (!settings.enableRateLimiting) {
+    return;
+  }
+
+  // API requests rate limiter (per minute)
+  rateLimiterManager.register('api-minute', {
+    maxTokens: settings.apiRequestsPerMinute,
+    refillRate: settings.apiRequestsPerMinute,
+    refillInterval: 60000, // 1 minute
+  });
+
+  // API requests rate limiter (per hour)
+  rateLimiterManager.register('api-hour', {
+    maxTokens: settings.apiRequestsPerHour,
+    refillRate: settings.apiRequestsPerHour,
+    refillInterval: 3600000, // 1 hour
+  });
+}
+
+// Initialize on module load
+initializeRateLimiters();
+
+/**
+ * Create a rate limited executor for API calls with retry logic
+ */
+function createApiExecutor(): RateLimitedExecutor {
+  const settings = getRateLimitSettings();
+
+  return new RateLimitedExecutor(
+    {
+      maxTokens: settings.apiRequestsPerMinute,
+      refillRate: settings.apiRequestsPerMinute,
+      refillInterval: 60000,
+    },
+    {
+      maxRetries: 3,
+      baseDelay: 1000, // 1 second
+      maxDelay: 30000, // 30 seconds
+    }
+  );
+}
+
+const apiExecutor = createApiExecutor();
+
+/**
+ * Check rate limits before making an API request
+ * @throws Error if rate limit exceeded
+ */
+function checkRateLimit(): void {
+  const settings = getRateLimitSettings();
+
+  if (!settings.enableRateLimiting) {
+    return;
+  }
+
+  const fingerprint = getClientFingerprint();
+
+  // Check minute limit
+  const minuteResult = rateLimiterManager.consume('api-minute', fingerprint);
+  if (!minuteResult.allowed) {
+    throw new Error(
+      `Rate limit exceeded: ${settings.apiRequestsPerMinute} requests per minute. ` +
+      `Retry after ${Math.ceil((minuteResult.retryAfter || 0) / 1000)} seconds.`
+    );
+  }
+
+  // Check hour limit
+  const hourResult = rateLimiterManager.consume('api-hour', fingerprint);
+  if (!hourResult.allowed) {
+    throw new Error(
+      `Rate limit exceeded: ${settings.apiRequestsPerHour} requests per hour. ` +
+      `Retry after ${Math.ceil((hourResult.retryAfter || 0) / 1000)} seconds.`
+    );
+  }
+}
+
+/**
+ * Get current rate limit status
+ */
+export interface RateLimitStatus {
+  tokensRemainingMinute: number;
+  tokensRemainingHour: number;
+  rateLimitingEnabled: boolean;
+}
+
+export function getRateLimitStatus(): RateLimitStatus {
+  const settings = getRateLimitSettings();
+  const fingerprint = getClientFingerprint();
+
+  if (!settings.enableRateLimiting) {
+    return {
+      tokensRemainingMinute: Infinity,
+      tokensRemainingHour: Infinity,
+      rateLimitingEnabled: false,
+    };
+  }
+
+  return {
+    tokensRemainingMinute: rateLimiterManager.getTokens('api-minute', fingerprint),
+    tokensRemainingHour: rateLimiterManager.getTokens('api-hour', fingerprint),
+    rateLimitingEnabled: true,
+  };
+}
+
+// ============================================================================
 // API Client
 // ============================================================================
 
@@ -112,37 +230,50 @@ export interface StreamCallbacks {
  * Execute a PR agent task
  */
 export async function executeTask(request: ExecuteRequest): Promise<ExecuteResponse> {
+  // Check rate limits before making request
+  checkRateLimit();
+
   const baseUrl = getApiBaseUrl();
   const githubToken = request.githubToken || getConfigValue('githubToken');
+  const fingerprint = request.clientFingerprint || getClientFingerprint();
 
-  let response: Response;
-  try {
-    response = await fetch(`${baseUrl}/api/pr-agent/execute`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        repo: request.repo,
-        task: request.task,
-        branch: request.branch,
-        skill: request.skill,
-        useSDK: request.useSDK,
-        githubToken,
-        clientFingerprint: request.clientFingerprint || getClientFingerprint(),
-      }),
-    });
-  } catch (err: any) {
-    // Network error - backend not reachable
-    throw new Error(`Cannot connect to API at ${baseUrl}. Is the backend running? (${err.message})`);
-  }
+  // Execute with rate limiting and retry logic
+  return await apiExecutor.execute(fingerprint, async () => {
+    let response: Response;
+    try {
+      response = await fetch(`${baseUrl}/api/pr-agent/execute`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          repo: request.repo,
+          task: request.task,
+          branch: request.branch,
+          skill: request.skill,
+          useSDK: request.useSDK,
+          githubToken,
+          clientFingerprint: fingerprint,
+        }),
+      });
+    } catch (err: any) {
+      // Network error - backend not reachable
+      throw new Error(`Cannot connect to API at ${baseUrl}. Is the backend running? (${err.message})`);
+    }
 
-  if (!response.ok) {
-    const error = (await response.json().catch(() => ({ error: 'Unknown error' }))) as { error?: string; message?: string };
-    throw new Error(error.error || error.message || `HTTP ${response.status}`);
-  }
+    if (!response.ok) {
+      const error = (await response.json().catch(() => ({ error: 'Unknown error' }))) as { error?: string; message?: string };
 
-  return (await response.json()) as ExecuteResponse;
+      // Handle rate limit from server
+      if (response.status === 429) {
+        throw new Error('429: Rate limited by server. Please wait and try again.');
+      }
+
+      throw new Error(error.error || error.message || `HTTP ${response.status}`);
+    }
+
+    return (await response.json()) as ExecuteResponse;
+  });
 }
 
 /**
@@ -253,6 +384,9 @@ export interface ListJobsResponse {
  * Uses GitHub username if authenticated, falls back to fingerprint/IP
  */
 export async function listJobs(options?: { status?: string; limit?: number }): Promise<ListJobsResponse> {
+  // Check rate limits before making request
+  checkRateLimit();
+
   const baseUrl = getApiBaseUrl();
   const fingerprint = getClientFingerprint();
   const githubUsername = getConfigValue('githubUsername');
@@ -277,6 +411,12 @@ export async function listJobs(options?: { status?: string; limit?: number }): P
 
   if (!response.ok) {
     const error = (await response.json().catch(() => ({ error: 'Unknown error' }))) as { error?: string; message?: string };
+
+    // Handle rate limit from server
+    if (response.status === 429) {
+      throw new Error('Rate limited by server. Please wait and try again.');
+    }
+
     throw new Error(error.error || error.message || `HTTP ${response.status}`);
   }
 

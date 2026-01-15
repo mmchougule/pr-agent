@@ -12,6 +12,14 @@ global.fetch = mockFetch;
 vi.mock('../lib/config', () => ({
   getApiBaseUrl: () => 'https://api.test.com',
   getConfigValue: vi.fn(),
+  getRateLimitSettings: () => ({
+    apiRequestsPerMinute: 60,
+    apiRequestsPerHour: 1000,
+    claudeRequestsPerMinute: 50,
+    claudeRequestsPerHour: 1000,
+    commandsPerMinute: 30,
+    enableRateLimiting: false, // Disabled for most tests
+  }),
 }));
 
 // Import after mocking
@@ -73,7 +81,8 @@ describe('API Client', () => {
     });
 
     it('should throw error on rate limit', async () => {
-      mockFetch.mockResolvedValueOnce({
+      // Mock multiple responses for the retry logic
+      mockFetch.mockResolvedValue({
         ok: false,
         status: 429,
         json: () => Promise.resolve({
@@ -87,7 +96,7 @@ describe('API Client', () => {
           repo: 'test/repo',
           task: 'test',
         })
-      ).rejects.toThrow('Rate limit exceeded');
+      ).rejects.toThrow('429');
     });
 
     it('should handle network errors', async () => {
@@ -187,5 +196,68 @@ describe('API Client - Client Fingerprint', () => {
 
     // Fingerprints should be the same for same environment
     expect(body1.clientFingerprint).toBe(body2.clientFingerprint);
+  });
+});
+
+describe('API Client - Rate Limiting Integration', () => {
+  beforeEach(() => {
+    mockFetch.mockClear();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should handle server 429 responses with retry', async () => {
+    // First call returns 429, second succeeds
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        json: () => Promise.resolve({
+          error: 'Rate limit exceeded',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          jobId: 'test-job-123',
+          streamUrl: '/api/pr-agent/test-job-123/stream',
+        }),
+      });
+
+    // Should eventually succeed after retry
+    const promise = executeTask({
+      repo: 'test/repo',
+      task: 'test',
+    });
+
+    // Advance timers to allow retry
+    await vi.runAllTimersAsync();
+
+    const result = await promise;
+    expect(result.jobId).toBe('test-job-123');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('should include rate limit error in message for 429 status', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: () => Promise.resolve({
+        error: 'Rate limit exceeded',
+      }),
+    });
+
+    const promise = executeTask({
+      repo: 'test/repo',
+      task: 'test',
+    });
+
+    // Advance timers to allow retries
+    await vi.runAllTimersAsync();
+
+    await expect(promise).rejects.toThrow('429');
   });
 });
