@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Box, useApp, useInput } from 'ink';
-import { Intro, StepList, ResultBox, ErrorBox, PhaseStatus } from './components/index.js';
+import { Intro, StepList, ResultBox, ErrorBox, PhaseStatus, ProgressBar } from './components/index.js';
 import type { Step } from './components/StepList.js';
 import type { Phase } from './components/PhaseStatus.js';
 import { AuthFlow } from './components/AuthFlow.js';
@@ -69,6 +69,7 @@ function RunMode({
   const showSteps = state.steps.some(s => s.status !== 'pending');
   const showStreamingLogs = state.agentLogs.length > 0;
   const showSandboxMonitor = state.sandboxMetrics && (state.status === 'streaming' || state.status === 'executing');
+  const showProgressBar = (state.status === 'executing' || state.status === 'streaming') && state.progress > 0;
   const showResult = state.status === 'success' && state.result;
   const showError = state.status === 'failed' && state.error;
 
@@ -76,6 +77,18 @@ function RunMode({
     <Box flexDirection="column">
       {showPhaseStatus && (
         <PhaseStatus phase={state.phase} message={state.message} />
+      )}
+
+      {showProgressBar && (
+        <Box marginY={1}>
+          <ProgressBar
+            progress={state.progress}
+            style="bar"
+            width={40}
+            label="Progress:"
+            showPercentage={true}
+          />
+        </Box>
       )}
 
       {showSandboxMonitor && state.sandboxMetrics && (
